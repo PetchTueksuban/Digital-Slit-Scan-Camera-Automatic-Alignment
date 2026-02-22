@@ -18,3 +18,9 @@ Once the scan is finished, the system performs a "Fixed Alignment":
    * 1.Triple Stacking: The scan is horizontally duplicated 3 times to create a continuous loop.  
    * 2.Feature Matching: SIFT finds unique points on the scan vs. the reference.  
    * 3.Warping: The best match is extracted and warped to create result_fixed.png.
+
+**the image shown thecans that start scan in differrence position and result will come same.**
+
+<img width="1575" height="1080" alt="result_fixed_1771662590" src="https://github.com/user-attachments/assets/a6a65625-7fed-4cb6-83ab-690be5bff5d9" />
+
+<img width="1575" height="1080" alt="ref" src="https://github.com/user-attachments/assets/cce613f3-2206-4b7e-b989-9cfa30a7ec0f" />
