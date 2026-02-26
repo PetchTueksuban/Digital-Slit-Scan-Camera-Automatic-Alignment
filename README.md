@@ -1,26 +1,26 @@
-# Digital-Slit-Scan-Camera-Automatic-Alignment
-This project is an advanced evolution of the Digital-Slit-Scan-Camera. It transforms a standard webcam into a high-precision cylindrical scanner, capable of unwrapping can labels and automatically aligning them with a reference template.  
+# Digital-Slit-Scan-Camera-Automatic-Alignment  
+**Digital Slit-Scan Camera** is a professional-grade imaging tool designed for Cylindrical Surface Inspection and High-Resolution Dimensional Measurement.  
+This system unwraps rotating cylindrical objects into a flat 2D map and utilizes an automatic template matching algorithm to align the result with a reference image for defect detection..  
 
-# Key Features (Update 2026)
-* Intelligent Auto-Trigger: Starts scanning only when an object is detected and stabilized at the center for 1 second.
-* Dynamic Perspective Correction: Automatically warps the camera view to align with the can's surface before scanning.
-* High-Precision Alignment (SIFT): Uses SIFT and FLANN Matcher to automatically fix alignment errors, ensuring the scanned result matches your ref.png perfectly.
-* Triple-Width Stitching Logic: A specialized technique that stacks the scanned image three times to prevent "cut-off" patterns and ensure a seamless 360-degree match.
-* USAC_ACCURATE Homography: Employs advanced outlier rejection to handle tricky reflections on metallic can surfaces.
-
+# Key Features 
+* **Ultra-Sharp RAW Sampling:** Utilizes a precise 2-pixel width "slit" extraction from the center of each frame, eliminating Bayer pattern artifacts and providing superior clarity over standard scanning methods
+* **Automatic Template Matching:** Dynamically calculates the object's center and performs an image "roll" to perfectly align the scanned output with the ref.png master image.
+* **Red-Line Inspection Scale:** Generates a vertical comparison grid every 100 pixels between the Reference (Top) and Scan (Bottom), allowing for immediate visual detection of distortions or dents.Red-Line Inspection Scale: Generates a vertical comparison grid every 100 pixels between the Reference (Top) and Scan (Bottom), allowing for immediate visual detection of distortions or dents.
+* **Intelligent Auto-Trigger:** Features an HSV-based green screen detection system that automatically starts the scan after a 1.0-second stability delay when an object is detected.
+* **High-Precision Measurement:** Automatically calculates the object's diameter in centimeters using calibrated pixel-to-mm ratios.
+  
 # How it Works (System Logic)  
-**1. Detection Phase**  
-The system uses HSV Color Masking to detect a green background. When the center area is blocked by a non-green object (the can), the countdown begins.  
-**2. Scanning Phase (Slit-Scan)**  
-Instead of taking a full photo, the system extracts a 1-pixel wide vertical "slit" from the center of each frame and stacks them horizontally over 21 seconds.  
-**3. Post-Processing & Alignment**  
+**Prepare Reference**  
+Place your master image in the project folder and name it ref.png. 
+**Configuration**  
+Adjust LOCKED_FOCUS_VALUE and PIXEL_PER_MM_FINAL in the script to match your hardware setup and camera distance.
+**Run the System:**  
 Once the scan is finished, the system performs a "Fixed Alignment":  
-   * 1.Triple Stacking: The scan is horizontally duplicated 3 times to create a continuous loop.  
-   * 2.Feature Matching: SIFT finds unique points on the scan vs. the reference.  
-   * 3.Warping: The best match is extracted and warped to create result_fixed.png.
+   * Execute the script: python main.py.
+   * Place the object on the rotating platform. The system will wait for 1.0s to stabilize and then begin scanning automatically.  
+   * Once the 594 pixels are captured, the INSPECTION window will display the vertical comparison with red scale lines and save the report to your drive.
 
-**the image shown thecans that start scan in differrence position and result will come same.**
+**the image shown thecans that start scan in differrence position and result will come same.**  
+<img width="1495" height="2160" alt="comparison_report_1772036554" src="https://github.com/user-attachments/assets/44803572-666a-4c17-b7d1-3c8ba38bc345" />
 
-<img width="1575" height="1080" alt="result_fixed_1771662590" src="https://github.com/user-attachments/assets/a6a65625-7fed-4cb6-83ab-690be5bff5d9" />
 
-<img width="1575" height="1080" alt="ref" src="https://github.com/user-attachments/assets/cce613f3-2206-4b7e-b989-9cfa30a7ec0f" />
