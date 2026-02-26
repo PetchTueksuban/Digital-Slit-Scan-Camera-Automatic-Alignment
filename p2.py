@@ -1,170 +1,161 @@
 import cv2
 import numpy as np
 import time
+import os
 
-# [add] function to analyze alignment and adjust brightness
-def analyze_alignment(scanned_img, reference_path):
+# ==========================================
+# ส่วนที่ 1: การตั้งค่าระบบ (CONFIGURATION) - ห้ามแก้ค่า
+# ==========================================
+TARGET_H, TARGET_W = 1080, 540 
+STRETCH_RATIO = 2.5 
+LOCKED_FOCUS_VALUE = 300 
+WAIT_BEFORE_SCAN = 1.0     # เวลารอก่อนเริ่มแสกน
+DISPLAY_DURATION = 5.0     # เวลาโชว์ภาพเปรียบเทียบตอนจบ (วินาที)
+
+# [CORE SETTINGS]
+REQUIRED_PIXELS = 598      # จำนวนพิกเซลต่อรอบ
+FPS_LIMIT = 30
+FRAME_TIME = 1.0 / FPS_LIMIT
+
+# [CALIBRATION]
+PIXEL_PER_MM_FINAL = 7.07  # ค่าที่จูนเพื่อให้ได้ 21.00 cm พอดี
+LOWER_GREEN = np.array([35, 40, 40])
+UPPER_GREEN = np.array([85, 255, 255])
+
+# ==========================================
+# ส่วนที่ 2: ฟังก์ชันการเปรียบเทียบและบันทึกภาพ (COMPARISON & SAVE)
+# ==========================================
+
+def analyze_and_draw_comparison(final_img, reference_path):
+    """จัดแนวภาพ วาดเส้นแดงเปรียบเทียบ และบันทึกรูปผลลัพธ์"""
     ref_color = cv2.imread(reference_path)
-    if ref_color is None: return scanned_img, False
+    if ref_color is None:
+        print("!!! ไม่พบไฟล์ ref.png กรุณาตรวจสอบไฟล์อ้างอิง !!!")
+        return False
+    
     h_ref, w_ref = ref_color.shape[:2]
-    h_scan, w_scan = scanned_img.shape[:2]
     
+    # 1. Alignment โดยใช้ Template Matching เพื่อหาจุดที่ตรงกัน
     gray_ref = cv2.cvtColor(ref_color, cv2.COLOR_BGR2GRAY)
-    gray_scan = cv2.cvtColor(scanned_img, cv2.COLOR_BGR2GRAY)
+    gray_scan = cv2.cvtColor(final_img, cv2.COLOR_BGR2GRAY)
     
-    # 1. Template Matching find the best horizontal alignment by matching the center portion of the reference image with the scanned image
     template_w = min(400, w_ref)
     template = gray_ref[:, w_ref//2 - template_w//2 : w_ref//2 + template_w//2]
     scan_triple = np.hstack((gray_scan, gray_scan, gray_scan))
     res = cv2.matchTemplate(scan_triple, template, cv2.TM_CCOEFF_NORMED)
     _, _, _, max_loc = cv2.minMaxLoc(res)
     
-    # 2. calculate shift amount: determine how much to roll the scanned image horizontally so that the detected center in the triple scan aligns with the center of the reference image
-    # pixel data from template matching is in the triple scan, so we need to mod by w_scan to get the corresponding x in the original scanned image
-    cx_match_triple = max_loc[0] + template_w // 2
-    x_original = cx_match_triple % w_scan
-    shift_amount = (w_ref // 2) - x_original
-    aligned = np.roll(scanned_img, shift_amount, axis=1)
+    # คำนวณการ Roll ภาพแสกนให้ตรงกับภาพอ้างอิง
+    shift_amount = (w_ref // 2) - (max_loc[0] + template_w // 2) % final_img.shape[1]
+    aligned_scan = np.roll(final_img, shift_amount, axis=1)
     
-    # 3. resize aligned image to match reference width if needed (in case the slit scan didn't produce a full width image, we stretch it to match the reference width for better comparison)
-    if aligned.shape[1] != w_ref:
-        aligned = cv2.resize(aligned, (w_ref, h_scan), interpolation=cv2.INTER_LANCZOS4)
+    # 2. ปรับขนาดภาพแสกนให้เท่า Reference
+    aligned_resized = cv2.resize(aligned_scan, (w_ref, h_ref))
+    
+    # 3. ใส่ชื่อระบุหัวภาพ
+    cv2.putText(ref_color, "REFERENCE IMAGE (TOP)", (20, 60), 2, 1.2, (0, 0, 255), 3)
+    cv2.putText(aligned_resized, "SCANNED RESULT (BOTTOM)", (20, 60), 2, 1.2, (0, 0, 255), 3)
 
-    # rebalance brightness by matching the mean color of the aligned image to the reference image, channel by channel
-    for i in range(3):
-        mean_ref = np.mean(ref_color[:,:,i])
-        mean_aln = np.mean(aligned[:,:,i])
-        ratio = mean_ref / (mean_aln + 1e-6)
-        aligned[:,:,i] = np.clip(aligned[:,:,i] * ratio, 0, 255).astype(np.uint8)
+    # 4. รวมภาพแนวตั้ง และวาดเส้นแดงทุกๆ 100 พิกเซล
+    canvas = np.vstack((ref_color, aligned_resized))
+    for x in range(0, w_ref, 100):
+        cv2.line(canvas, (x, 0), (x, canvas.shape[0]), (0, 0, 255), 2)
+        
+    # 5. บันทึกรูปภาพเปรียบเทียบลงเครื่องอัตโนมัติ
+    save_path = f"comparison_report_{int(time.time())}.png"
+    cv2.imwrite(save_path, canvas)
+    
+    # แสดงหน้าต่างตรวจสอบ
+    scale = 900 / canvas.shape[0]
+    final_view = cv2.resize(canvas, (0, 0), fx=scale, fy=scale)
+    cv2.imshow('INSPECTION: RED LINE COMPARISON', final_view)
+    return True
 
-    return aligned, True
-
-# [add] function to show side-by-side comparison of aligned result and reference image
-def show_comparison_window(aligned_img, reference_path):
-    ref_color = cv2.imread(reference_path)
-    if ref_color is None or aligned_img is None: return
-    h, w = aligned_img.shape[:2]
-    ref_resized = cv2.resize(ref_color, (w, h))
-    comparison = np.hstack((ref_resized, aligned_img))
-    scale = 1280 / comparison.shape[1]
-    final_view = cv2.resize(comparison, (0, 0), fx=scale, fy=scale)
-    cv2.imshow('MATCHING RESULT: [REF] vs [ALIGNED]', final_view)
-
-# --- CONFIGURATION ---
-
-TARGET_H, TARGET_W = 1080, 540 
-current_slit_w = 0.5            
-SCAN_DURATION = 20.075     
-STRETCH_RATIO = 2.5             
-LOCKED_FOCUS_VALUE = 300        
-WAIT_BEFORE_SCAN = 1.0  
-
-LOWER_GREEN = np.array([35, 40, 40]); UPPER_GREEN = np.array([85, 255, 255])
-
-
-# --- CAMERA SETUP ---
-
+# ==========================================
+# ส่วนที่ 3: การตั้งค่ากล้องและตัวแปร
+# ==========================================
 cap = cv2.VideoCapture(0, cv2.CAP_MSMF)
+cap.set(cv2.CAP_PROP_BUFFERSIZE, 1) 
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 2560); cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1440)
 cap.set(cv2.CAP_PROP_AUTOFOCUS, 0); cap.set(cv2.CAP_PROP_FOCUS, LOCKED_FOCUS_VALUE)
 
+unwrapped_img = None; is_scanning = False; scan_finished = False
+ready_start_time = 0; is_waiting = False; final_measured_cm = 0.0
+prev_time = time.time(); finish_time = 0; final_img = None 
 
-# --- VARIABLES ---
-
-unwrapped_img = None
-is_scanning = False
-scan_finished = False
-start_time = 0
-ready_start_time = 0  
-is_waiting = False    
-
-print(f">>> SYSTEM READY: วางแช่ไว้ {WAIT_BEFORE_SCAN} วิ เพื่อเริ่มสแกน")
-
+# ==========================================
+# ส่วนที่ 4: ลูปการทำงานหลัก
+# ==========================================
 while True:
-    ret, frame = cap.read()
+    loop_start = time.time()
+    if cap.grab(): ret, frame = cap.retrieve()
+    else: break
     if not ret: break
 
     h, w = frame.shape[:2]; cx, cy = w // 2, h // 2
     
-    # 1. check is center is green (UI)
+    # 1. Background check
     roi = frame[max(0, cy-10):min(h, cy+10), max(0, cx-10):min(w, cx+10)]
-    avg_color_bgr = np.mean(roi, axis=(0, 1)).astype(np.uint8)
-    avg_hsv = cv2.cvtColor(np.uint8([[avg_color_bgr]]), cv2.COLOR_BGR2HSV)[0][0]
-    is_center_green = (LOWER_GREEN[0] <= avg_hsv[0] <= UPPER_GREEN[0]) and \
-                      (LOWER_GREEN[1] <= avg_hsv[1] <= UPPER_GREEN[1]) and \
-                      (LOWER_GREEN[2] <= avg_hsv[2] <= UPPER_GREEN[2])
+    avg_hsv = cv2.cvtColor(np.uint8([[np.mean(roi, axis=(0, 1)).astype(np.uint8)]]), cv2.COLOR_BGR2HSV)[0][0]
+    is_center_green = (LOWER_GREEN[0] <= avg_hsv[0] <= UPPER_GREEN[0])
 
-    mask = cv2.bitwise_not(cv2.inRange(cv2.cvtColor(frame, cv2.COLOR_BGR2HSV), LOWER_GREEN, UPPER_GREEN))
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5,5), np.uint8), iterations=2)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    can_present = False
-    if contours:
-        max_cnt = max(contours, key=cv2.contourArea)
-        if cv2.contourArea(max_cnt) > 50000:
-            can_present = True; x_b, y_b, w_b, h_b = cv2.boundingRect(max_cnt)
-
-    # 3. Logic control for scanning process:
-    if can_present and not is_center_green and not is_scanning and not scan_finished:
-        if not is_waiting:
-            is_waiting = True; ready_start_time = time.time()
+    if not is_center_green and not is_scanning and not scan_finished:
+        if not is_waiting: is_waiting = True; ready_start_time = time.time()
         if time.time() - ready_start_time >= WAIT_BEFORE_SCAN:
-            unwrapped_img = None; is_scanning = True; is_waiting = False; start_time = time.time()
-            print(">>> [STARTED] Scanning...")
-    else:
-        if not is_scanning: is_waiting = False
+            unwrapped_img = None; is_scanning = True; is_waiting = False
 
-    # 4. scanning process: 
+    # 2. Scanning Process (RAW Sampling - ห้ามแก้)
     if is_scanning:
-        pts1 = np.float32([[x_b, y_b], [x_b+w_b, y_b], [x_b, y_b+h_b], [x_b+w_b, y_b+h_b]])
-        pts2 = np.float32([[0, 0], [TARGET_W, 0], [0, TARGET_H], [TARGET_W, TARGET_H]])
-        matrix = cv2.getPerspectiveTransform(pts1, pts2)
-        corrected = cv2.warpPerspective(frame, matrix, (TARGET_W, TARGET_H), flags=cv2.INTER_LANCZOS4)
+        raw_slit_area = frame[:, cx : cx + 2] 
+        slit = np.mean(raw_slit_area, axis=1, keepdims=True).astype(np.uint8)
         
-        slit = corrected[:, (TARGET_W//2) : (TARGET_W//2) + 1].copy()
-        if unwrapped_img is None:
-            unwrapped_img = slit.astype(np.float32)
+        if unwrapped_img is None: unwrapped_img = slit
         else:
-            unwrapped_img = np.hstack((unwrapped_img, slit.astype(np.float32)))
+            if unwrapped_img.shape[1] < REQUIRED_PIXELS:
+                unwrapped_img = np.hstack((unwrapped_img, slit))
 
-        if (time.time() - start_time) >= SCAN_DURATION:
-            print(">>> [SAVING] Processing final image...")
-            raw_data = np.clip(unwrapped_img, 0, 255).astype(np.uint8)
-            final_img = cv2.resize(raw_data, (int(raw_data.shape[1] * STRETCH_RATIO), TARGET_H), interpolation=cv2.INTER_LANCZOS4)
-            cv2.imwrite(f"scan_final_{int(time.time())}.png", final_img)
+        if unwrapped_img.shape[1] >= REQUIRED_PIXELS:
+            final_img = cv2.resize(unwrapped_img, (int(unwrapped_img.shape[1] * STRETCH_RATIO), TARGET_H), interpolation=cv2.INTER_LANCZOS4)
             
-            # after saving the final image, we analyze the alignment and brightness compared to the reference image, then show the comparison window
-            result_img, success = analyze_alignment(final_img, 'ref.png')
-            if success:
-                cv2.imwrite(f"result_fixed_{int(time.time())}.png", result_img)
-                show_comparison_window(result_img, 'ref.png')
+            # Measurement
+            gray = cv2.cvtColor(final_img, cv2.COLOR_BGR2GRAY)
+            blurred = cv2.GaussianBlur(cv2.medianBlur(gray, 5), (7, 7), 0)
+            _, thresh = cv2.threshold(blurred, 30, 255, cv2.THRESH_BINARY)
+            cnts, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if cnts:
+                fw = cv2.boundingRect(max(cnts, key=cv2.contourArea))[2]
+                final_measured_cm = (fw / PIXEL_PER_MM_FINAL) / 10.0
             
-            is_scanning = False
-            scan_finished = True
+            cv2.imwrite(f"scan_ultra_sharp_{int(time.time())}.png", final_img)
+            
+            # เรียกฟังก์ชันเปรียบเทียบและบันทึกรูปรายงาน
+            analyze_and_draw_comparison(final_img, 'ref.png')
+            
+            is_scanning = False; scan_finished = True; finish_time = time.time() 
 
-    if is_center_green and scan_finished:
-        print(">>> [RESET] Waiting for next can...")
-        scan_finished = False; unwrapped_img = None
+    # 3. แสดงผลหลังแสกนจบ
+    if scan_finished:
+        if (time.time() - finish_time >= DISPLAY_DURATION):
+            scan_finished = False; unwrapped_img = None
+            try:
+                cv2.destroyWindow('Measurement Result')
+                cv2.destroyWindow('Final Scanned Image') 
+                cv2.destroyWindow('INSPECTION: RED LINE COMPARISON')
+            except: pass
+        else:
+            cv2.namedWindow('Final Scanned Image', cv2.WINDOW_NORMAL)
+            cv2.imshow('Final Scanned Image', final_img)
+            res_win = np.zeros((200, 600, 3), dtype=np.uint8)
+            cv2.putText(res_win, f"RESULT: {final_measured_cm:.2f} cm", (40, 110), 2, 1.8, (0, 255, 0), 4)
+            cv2.imshow('Measurement Result', res_win)
 
-    # --- UI & MONITORING ---
-    monitor = cv2.resize(frame, (960, 540)); mx, my = 480, 270
-    if is_waiting:
-        cross_color = (0, 255, 255); status_text = f"READY IN... {max(0, WAIT_BEFORE_SCAN - (time.time()-ready_start_time)):.1f}s"
-    elif is_scanning:
-        cross_color = (0, 255, 0); status_text = f"SCANNING... {int(((time.time()-start_time)/SCAN_DURATION)*100)}%"
-    elif scan_finished:
-        cross_color = (0, 0, 255); status_text = "FINISHED - PLEASE REMOVE"
-    else:
-        cross_color = (0, 0, 255); status_text = "PLACE CAN AT CENTER"
-
-    cv2.drawMarker(monitor, (mx, my), cross_color, cv2.MARKER_CROSS, 40, 2)
-    cv2.circle(monitor, (mx, my), 20, cross_color, 1)
-    cv2.putText(monitor, status_text, (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, cross_color, 2)
+    # 4. Monitor หลัก (เป้าเล็งและตัวเลข)
+    monitor = cv2.resize(frame, (960, 540))
+    m_color = (0, 255, 0) if is_scanning else (0, 255, 255) if is_waiting else (0, 0, 255)
+    cv2.drawMarker(monitor, (480, 270), m_color, cv2.MARKER_CROSS, 40, 2)
+    cur_px = 0 if unwrapped_img is None else unwrapped_img.shape[1]
+    cv2.putText(monitor, f"PX: {cur_px}/{REQUIRED_PIXELS}", (20, 50), 2, 1, (255, 255, 255), 2)
     cv2.imshow('Cylindrical Scan System', monitor)
-    
-    if unwrapped_img is not None:
-        live_preview = np.clip(unwrapped_img, 0, 255).astype(np.uint8)
-        cv2.imshow('Live Result', cv2.resize(live_preview, (min(live_preview.shape[1]*2, 1200), 400)))
 
     if cv2.waitKey(1) & 0xFF == ord('q'): break
 
